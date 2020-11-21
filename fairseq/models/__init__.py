@@ -8,11 +8,9 @@ import argparse
 import importlib
 import os
 
-import fairseq
 from fairseq.dataclass import FairseqDataclass
-from fairseq.dataclass.utils import merge_with_parent
+from fairseq.dataclass.utils import merge_with_parent, populate_dataclass
 from hydra.core.config_store import ConfigStore
-from omegaconf import DictConfig, OmegaConf
 
 from .composite_encoder import CompositeEncoder
 from .distributed_fairseq_model import DistributedFairseqModel
@@ -52,7 +50,7 @@ __all__ = [
 ]
 
 
-def build_model(cfg: DictConfig, task):
+def build_model(cfg: FairseqDataclass, task):
 
     model = None
     model_type = getattr(cfg, "_name", None) or getattr(cfg, "arch", None)
@@ -78,7 +76,10 @@ def build_model(cfg: DictConfig, task):
     if model_type in MODEL_DATACLASS_REGISTRY:
         # set defaults from dataclass. note that arch name and model name can be the same
         dc = MODEL_DATACLASS_REGISTRY[model_type]
-        cfg = merge_with_parent(dc(), cfg)
+        if isinstance(cfg, argparse.Namespace):
+            cfg = populate_dataclass(dc(), cfg)
+        else:
+            cfg = merge_with_parent(dc(), cfg)
 
     assert model is not None, f"Could not infer model type from {cfg}"
 
@@ -126,6 +127,11 @@ def register_model(name, dataclass=None):
             node = dataclass()
             node._name = name
             cs.store(name=name, group="model", node=node, provider="fairseq")
+
+            @register_model_architecture(name, name)
+            def noop(_):
+                pass
+
         return cls
 
     return register_model_cls
@@ -155,15 +161,6 @@ def register_model_architecture(model_name, arch_name):
         arch_name (str): the name of the model architecture (``--arch``)
     """
 
-    def arch_override_from_yaml(args, arch):
-        root_dir = os.path.dirname(os.path.dirname(fairseq.__file__))
-        yaml_path = os.path.join(root_dir, "config/model/{}.yaml".format(arch))
-        if not os.path.exists(yaml_path):
-            raise RuntimeError(f"yaml file {yaml_path} does not exist!")
-        arch_cfg = OmegaConf.load(yaml_path)
-        for k, v in arch_cfg.items():
-            setattr(args, k, getattr(args, k, v))
-
     def register_model_arch_fn(fn):
         if model_name not in MODEL_REGISTRY:
             raise ValueError(
@@ -182,15 +179,7 @@ def register_model_architecture(model_name, arch_name):
         ARCH_MODEL_REGISTRY[arch_name] = MODEL_REGISTRY[model_name]
         ARCH_MODEL_NAME_REGISTRY[arch_name] = model_name
         ARCH_MODEL_INV_REGISTRY.setdefault(model_name, []).append(arch_name)
-        if type(fn) is type and issubclass(fn, BaseFairseqModel):
-            # for model classes migrated with hydra
-            # in this case, we are using this decorator directly on model class since
-            # we do not need arch overriding functions.
-            ARCH_CONFIG_REGISTRY[arch_name] = lambda args: arch_override_from_yaml(
-                args, arch=arch_name
-            )
-        else:
-            ARCH_CONFIG_REGISTRY[arch_name] = fn
+        ARCH_CONFIG_REGISTRY[arch_name] = fn
         return fn
 
     return register_model_arch_fn

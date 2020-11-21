@@ -173,6 +173,12 @@ class CommonConfig(FairseqDataclass):
     profile: bool = field(
         default=False, metadata={"help": "enable autograd profiler emit_nvtx"}
     )
+    reset_logging: bool = field(
+        default=True,
+        metadata={
+            "help": "when using Hydra, reset the logging at the beginning of training"
+        },
+    )
 
 
 @dataclass
@@ -203,10 +209,6 @@ class DistributedTrainingConfig(FairseqDataclass):
         },
     )
     device_id: int = field(
-        default=0,
-        metadata={"help": "which GPU to use (usually configured automatically)"},
-    )
-    local_rank: int = field(
         default=0,
         metadata={
             "help": "which GPU to use (usually configured automatically)",
@@ -874,7 +876,7 @@ class InteractiveConfig(FairseqDataclass):
 
 
 @dataclass
-class FairseqConfig(object):
+class FairseqConfig(FairseqDataclass):
     common: CommonConfig = CommonConfig()
     common_eval: CommonEvalConfig = CommonEvalConfig()
     distributed_training: DistributedTrainingConfig = DistributedTrainingConfig()
